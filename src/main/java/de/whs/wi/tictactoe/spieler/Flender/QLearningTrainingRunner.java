@@ -30,7 +30,7 @@ public class QLearningTrainingRunner {
         int gewinneZufall;
         int gewinneAgent;
         int unentschieden;
-        int trainingIterations = 2000000000;
+        double trainingIterations = 1e7;
 
         // Evaluate Before Training (Dies ist nun die Evaluierung des geladenen Zustands)
         gewinneZufall = 0;
@@ -52,9 +52,9 @@ public class QLearningTrainingRunner {
         System.out.println("=========================================================");
 
         // Training Phase (iterations)
-        System.out.printf("Starte Training mit %d Iterationen. Bitte warten...", trainingIterations);
+        System.out.printf("Starte Training mit %d Iterationen. Bitte warten...", ((int)trainingIterations));
         long startTime = System.currentTimeMillis();
-        agent.trainieren(new AbbruchNachIterationen(trainingIterations));
+        agent.trainieren(new AbbruchNachIterationen((int) trainingIterations));
         long endTime = System.currentTimeMillis();
         System.out.println("Training beendet. Gesamtdauer in Sekunden: " + ((endTime - startTime) / 1000.0));
 

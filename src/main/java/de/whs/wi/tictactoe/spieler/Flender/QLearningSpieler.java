@@ -17,12 +17,11 @@ public class QLearningSpieler implements ILernenderSpieler {
     private double[][] qMatrix = new double[ANZAHL_ZUSTAENDE][ANZAHL_AKTIONEN];
 
     // Lernparameter
-    private static final double ALPHA = 0.05; // Lernrate
+    private static final double ALPHA = 0.2; // Lernrate
     private static final double GAMMA = 0.95; // Diskontfaktor
     private final double EPSILON_TRAINING_START = 1.0; // Startwert für Epsilon im Training
     private double epsilon = 1.0; // Explorationsrate
     private final double MIN_EPSILON = 0.01;
-    private final double MAX_RUNDEN_TRAINING = 1e6;
 
     private Random random = new Random();
 
@@ -110,30 +109,39 @@ public class QLearningSpieler implements ILernenderSpieler {
     /**
      * Führt den Q-Learning-Update-Schritt durch.
      */
-    private void updateQ(Spielfeld internesSpielfeld, int aktion, double r, Spielfeld s_prime, Farbe agentFarbe) {
-        int sIndex = berechneZustandsIndex(internesSpielfeld);
+    private void updateQ(Spielfeld s_alt, int aktion, double r, Spielfeld s_prime, Farbe agentFarbe) {
+        int sIndex = berechneZustandsIndex(s_alt);
         int sPrimeIndex = berechneZustandsIndex(s_prime);
 
         // 1. Q(s, a)
         double q_old = qMatrix[sIndex][aktion];
 
-        // 2. max_a' Q(s', a') (Der höchste Q-Wert im Folgezustand)
-        double maxQ_sPrime = -Double.MAX_VALUE;
 
-        // Prüfen, ob das Spiel im Zustand s' beendet ist. Wenn ja, ist der zukünftige Wert 0.
-        Spielstand standA = s_prime.pruefeGewinn(agentFarbe);
-        Spielstand standG = s_prime.pruefeGewinn(agentFarbe.opposite());
+        // 2. Prüfen, ob s' terminal ist (egal wer gewonnen hat / unentschieden
+        Spielstand standAgent = s_prime.pruefeGewinn(agentFarbe);
+        Spielstand standGegner = s_prime.pruefeGewinn(agentFarbe.opposite());
 
-        if (standA != Spielstand.OFFEN || standG != Spielstand.OFFEN) {
+        // 3. max_a' Q(s', a') (Der höchste Q-Wert im Folgezustand)
+        double maxQ_sPrime;
+
+
+        if (standAgent != Spielstand.OFFEN || standGegner != Spielstand.OFFEN) {
+            // Terminaler Zustand erreicht (Gewinn, Verlust oder Unentschieden): kein zukünftiger Wert
             maxQ_sPrime = 0.0;
         } else {
-            // Spiel läuft, höchsten Q-Wert im Folgezustand suchen
+            // Nicht-terminal: max über alle LEGALEN Aktionen aus s'
+            maxQ_sPrime = -Double.MAX_VALUE;
             for (int a_prime = 0; a_prime < ANZAHL_AKTIONEN; a_prime++) {
-                if (qMatrix[sPrimeIndex][a_prime] > maxQ_sPrime) {
-                    maxQ_sPrime = qMatrix[sPrimeIndex][a_prime];
+                int zeile = a_prime / 3;
+                int spalte = a_prime % 3;
+                // Nur legale Aktionen berücksichtigen
+                if (s_prime.getFarbe(zeile, spalte) == Farbe.Leer) {
+                    if (qMatrix[sPrimeIndex][a_prime] > maxQ_sPrime) {
+                        maxQ_sPrime = qMatrix[sPrimeIndex][a_prime];
+                    }
                 }
             }
-            // Falls alle Werte -MAX_VALUE, setzen auf 0.0 (für den Fall, dass alle Aktionen in s' ungültig sind)
+            // Falls keine legale Aktion gefunden (Bord voll), zukünftiger Wert = 0
             if (maxQ_sPrime == -Double.MAX_VALUE) {
                 maxQ_sPrime = 0.0;
             }
@@ -141,7 +149,6 @@ public class QLearningSpieler implements ILernenderSpieler {
 
         // 3. Target-Berechnung: R + Gamma * max_a' Q(s', a')
         double qTarget = r + GAMMA * maxQ_sPrime;
-
         // 4. Q-Update: Q(s, a) <- Q(s, a) + Alpha * [Q_Target - Q(s, a)]
         qMatrix[sIndex][aktion] = q_old + ALPHA * (qTarget - q_old);
     }
@@ -156,28 +163,29 @@ public class QLearningSpieler implements ILernenderSpieler {
     public boolean trainieren(IAbbruchbedingung abbruchBedingung) {
         // 1. ZUERST Epsilon zurücksetzen, um neue Exploration zu erzwingen
         this.epsilon = EPSILON_TRAINING_START;
-
-        // Die Abbruchbedingung steuert die Gesamtanzahl der Spiele
         long rundenZaehler = 0;
 
-        // 2. Decay-Rate berechnen, die von 1.0 auf MIN_EPSILON über MAX_RUNDEN_TRAINING fällt
-        double decayRate = Math.pow(MIN_EPSILON / epsilon, 1.0 / MAX_RUNDEN_TRAINING);
+        // 2. Epsilon-Decay-Rate berechnen, die von 1.0 auf MIN_EPSILON über die ersten 500.000 Runden sinkt
+        double epsilonDecayRunden = 500_000.0;
+        double decayRate = Math.pow(MIN_EPSILON / epsilon, 1.0 / epsilonDecayRunden);
 
         while (!abbruchBedingung.abbruch()) {
 
             // Wechselnde Startspieler (z.B. 100.000 als Kreuz, 100.000 als Kreis)
-            Farbe starterFarbe = (rundenZaehler < MAX_RUNDEN_TRAINING / 2) ? Farbe.Kreuz : Farbe.Kreis;
+            Farbe starterFarbe = (rundenZaehler % 2 == 0) ? Farbe.Kreuz : Farbe.Kreis;
 
             simuliereEinSpiel(starterFarbe);
 
-            // Epsilon aktualisieren (Decay)
-            if (epsilon > MIN_EPSILON) {
+            // Epsilon nur während der Decay-Phase anpassen
+            if (rundenZaehler < epsilonDecayRunden && epsilon > MIN_EPSILON) {
                 epsilon *= decayRate;
+            } else {
+                epsilon = MIN_EPSILON; // Sicherstellen, dass Epsilon nicht unter MIN_EPSILON fällt
             }
 
-            if (rundenZaehler % 2000000 == 0) { // Ausgabe alle 20.000 Runden
-                System.out.printf("Runde %d/%d. Epsilon: %.4f%n",
-                        rundenZaehler, (int)MAX_RUNDEN_TRAINING, epsilon);
+            if (rundenZaehler % 200_000 == 0) { // Ausgabe alle 20.000 Runden
+                System.out.printf("Runde %d. Epsilon: %.4f%n",
+                        rundenZaehler, epsilon);
             }
             rundenZaehler++;
         }
@@ -238,7 +246,7 @@ public class QLearningSpieler implements ILernenderSpieler {
                 } else if (stand == Spielstand.VERLOREN) {
                     reward = -1.0; // Verlust
                 } else { // UNENTSCHIEDEN
-                    reward = 0.9; // positiver Reward für Unentschieden
+                    reward = 0.0; // positiver Reward für Unentschieden
                 }
             }
 
@@ -288,7 +296,7 @@ public class QLearningSpieler implements ILernenderSpieler {
         }
         // 2. Beste Aktion im aktuellen (realen) Zustand wählen (epsilon=MIN_EPSILON, da Training beendet)
         double aktuellesEpsilon = this.epsilon;
-        this.epsilon = MIN_EPSILON; // Deaktiviere Exploration für den Wettkampf
+        this.epsilon = 0.0; // Deaktiviere Exploration für den Wettkampf
         int aktion = waehleAktion(internesSpielfeld);
         this.epsilon = aktuellesEpsilon; // Epsilon für eventuelles Training wiederherstellen
 
@@ -338,8 +346,6 @@ public class QLearningSpieler implements ILernenderSpieler {
             System.out.println("Q-Matrix erfolgreich geladen. Epsilon: " + this.epsilon);
         } catch (ClassNotFoundException e) {
             throw new IOException("Fehler beim Laden der Q-Matrix: " + e.getMessage());
-        } catch (IOException e) {
-            System.err.println("Fehler beim Laden der Q-Matrix: " + e.getMessage());
         }
     }
 }
