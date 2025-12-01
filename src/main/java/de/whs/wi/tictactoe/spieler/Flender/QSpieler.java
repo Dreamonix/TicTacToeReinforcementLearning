@@ -7,7 +7,7 @@ import tictactoe.spieler.ILernenderSpieler;
 import java.io.*;
 import java.util.*;
 
-public class Spieler implements ILernenderSpieler {
+public class QSpieler implements ILernenderSpieler {
     private String spielerName;
     private Farbe spielerFarbe;
     private Spielfeld spielfeld;
@@ -17,7 +17,7 @@ public class Spieler implements ILernenderSpieler {
     private final Map<String, double[]> qTable = new HashMap<>();
     private final double alpha = 0.1; // Learning rate
     private final double gamma = 0.9; // Discount factor
-    private final double epsilon = 0.2; // Exploration rate
+    private final double epsilon = 0.0; // Exploration rate
 
     private final List<StateAction> episodeHistory = new ArrayList<>();
 
@@ -32,37 +32,78 @@ public class Spieler implements ILernenderSpieler {
 
     @Override
     public boolean trainieren(IAbbruchbedingung iAbbruchbedingung) {
-        // Simple self-play training loop until the abort condition signals stop.
-        // The IAbbruchbedingung interface is provided by the JAR; here we poll it.
-        // For each episode we simulate a game between two agents (this agent vs random),
-        // record the episode and perform a simple Monte-Carlo style update on Q-values.
         int episodes = 0;
+        long startNs = System.nanoTime();
+        if (this.spielerFarbe == null) this.spielerFarbe = Farbe.Kreis;
+
         while (!iAbbruchbedingung.abbruch()) {
             episodes++;
+            // fresh training board and agent internal state
             Spielfeld s = new Spielfeld();
-            Farbe currentPlayer = Farbe.Kreis;
-            List<StateAction> episode = new ArrayList<>();
-            // play until terminal
-            while (s.pruefeGewinn(spielerFarbe) == Spielstand.OFFEN) {
-                String state = serializeState(s);
-                int action = selectActionForState(state, s);
-                int row = action / 3;
-                int col = action % 3;
-                s.setFarbe(row, col, currentPlayer);
-                episode.add(new StateAction(state, action));
-                if (s.pruefeGewinn(spielerFarbe) != Spielstand.OFFEN) break;
-                // opponent random move
-                List<Integer> avail = availableActions(s);
-                if (avail.isEmpty()) break;
-                int opp = avail.get(random.nextInt(avail.size()));
-                s.setFarbe(opp / 3, opp % 3, currentPlayer.opposite());
+            this.episodeHistory.clear();
+            this.neuesSpiel(this.spielerFarbe, 0);
+
+            boolean agentStarts = random.nextBoolean(); // per-episode starter
+            Zug lastOpponentMove = null;
+
+            // play until terminal or no moves
+            while (true) {
+                // Agent's turn first this round
+                if (agentStarts) {
+                    // Agent plays (passed previous opponent move)
+                    Zug agentMove;
+                    try {
+                        agentMove = this.berechneZug(lastOpponentMove, 0L, 0L);
+                    } catch (IllegalerZugException e) {
+                        break; // malformed agent move -> abort episode
+                    }
+                    s.setFarbe(agentMove.getZeile(), agentMove.getSpalte(), this.spielerFarbe);
+                    // check terminal
+                    if (s.pruefeGewinn(spielerFarbe) != Spielstand.OFFEN) break;
+
+                    // Opponent random move
+                    List<Integer> avail = availableActions(s);
+                    if (avail.isEmpty()) break;
+                    int opp = avail.get(random.nextInt(avail.size()));
+                    s.setFarbe(opp / 3, opp % 3, this.spielerFarbe.opposite());
+                    lastOpponentMove = new Zug(opp / 3, opp % 3);
+
+                    // continue with agent starting next sub-turn
+                    agentStarts = true;
+                } else {
+                    // Opponent starts this round
+                    List<Integer> avail = availableActions(s);
+                    if (avail.isEmpty()) break;
+                    int opp = avail.get(random.nextInt(avail.size()));
+                    s.setFarbe(opp / 3, opp % 3, this.spielerFarbe.opposite());
+                    lastOpponentMove = new Zug(opp / 3, opp % 3);
+
+                    // Agent responds
+                    Zug agentMove;
+                    try {
+                        agentMove = this.berechneZug(lastOpponentMove, 0L, 0L);
+                    } catch (IllegalerZugException e) {
+                        break;
+                    }
+                    s.setFarbe(agentMove.getZeile(), agentMove.getSpalte(), this.spielerFarbe);
+                    if (s.pruefeGewinn(spielerFarbe) != Spielstand.OFFEN) break;
+
+                    // next round agent may or may not start; choose randomly per episode loop iteration
+                    agentStarts = random.nextBoolean();
+                }
+
+                // If board full -> break
+                if (availableActions(s).isEmpty()) break;
             }
-            // reward from perspective of this player
+
+            // compute reward from agent perspective
             double reward;
             if (s.pruefeGewinn(spielerFarbe) == Spielstand.GEWONNEN) reward = 1.0;
             else if (s.pruefeGewinn(spielerFarbe) == Spielstand.UNENTSCHIEDEN) reward = 0.0;
             else reward = -1.0;
-            // simple backward update (Monte-Carlo)
+
+            // update Q-table by going backwards over recorded episode
+            List<StateAction> episode = new ArrayList<>(this.episodeHistory);
             double G = reward;
             for (int i = episode.size() - 1; i >= 0; i--) {
                 StateAction sa = episode.get(i);
@@ -71,8 +112,9 @@ public class Spieler implements ILernenderSpieler {
                 q[sa.actionIndex] = old + alpha * (G - old);
                 G = gamma * G;
             }
-            // allow aborting after many episodes if needed
+            this.episodeHistory.clear();
         }
+
         return true;
     }
 
@@ -133,18 +175,34 @@ public class Spieler implements ILernenderSpieler {
     @Override
     public Zug berechneZug(Zug vorherigerZug, long x, long y) throws IllegalerZugException {
         //Zunächst den vorherigen Zug des Gegners durchführen
-        if (vorherigerZug != null)
+        if (vorherigerZug != null) {
             spielfeld.setFarbe(vorherigerZug.getZeile(),
                     vorherigerZug.getSpalte(),
                     spielerFarbe.opposite());
-            Zug neuerZug;
-            do {
-                neuerZug = new Zug(random.nextInt(3), random.nextInt(3));
-            }
-            while (spielfeld.getFarbe(neuerZug.getZeile(), neuerZug.getSpalte()) != Farbe.Leer);
-            spielfeld.setFarbe(neuerZug.getZeile(), neuerZug.getSpalte(), spielerFarbe);
-            return neuerZug;
+        }
+        // choose action based on current board state
+        String state = serializeState(spielfeld);
+        int actionIndex = selectAction(state);
+        int row = actionIndex / 3;
+        int col = actionIndex % 3;
 
+        // If chosen cell is not free, pick a random free cell (fallback)
+        if (spielfeld.getFarbe(row, col) != Farbe.Leer) {
+            List<Integer> avail = availableActions(spielfeld);
+            if (avail.isEmpty()) throw new IllegalerZugException();
+            {
+                System.out.println("No available moves!");
+            }
+            int a = avail.get(random.nextInt(avail.size()));
+            row = a / 3;
+            col = a % 3;
+            actionIndex = a;
+        }
+
+        // Perform move and record for training
+        spielfeld.setFarbe(row, col, spielerFarbe);
+        this.episodeHistory.add(new StateAction(state, actionIndex));
+        return new Zug(row, col);
     }
 
 
@@ -203,6 +261,12 @@ public class Spieler implements ILernenderSpieler {
                 if (q[a] > bestVal) { best = a; bestVal = q[a]; }
             }
             return best;
+        }
+    }
+
+    public int getQTableSize() {
+        synchronized (qTable) {
+            return qTable.size();
         }
     }
 }
