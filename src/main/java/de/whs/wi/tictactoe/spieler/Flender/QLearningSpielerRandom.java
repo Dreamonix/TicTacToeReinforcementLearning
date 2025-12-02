@@ -8,7 +8,7 @@ import tictactoe.spieler.beispiel.Zufallsspieler;
 import java.io.*;
 import java.util.Random;
 
-public class QLearningSpieler implements ILernenderSpieler {
+public class QLearningSpielerRandom implements ILernenderSpieler {
    // --- Q-Matrix und Hyperparameter ---
     private static final int ANZAHL_ZUSTAENDE = 19683; // 3^9 mögliche Zustände
     private static final int ANZAHL_AKTIONEN = 9; // 3x3 Spielfeld
@@ -31,7 +31,7 @@ public class QLearningSpieler implements ILernenderSpieler {
     private Spielfeld internesSpielfeld; // Kopie des Spielfelds für interne Zustandsverfolgung
 
     // --- Konstruktor ---
-    public QLearningSpieler(String name) {
+    public QLearningSpielerRandom(String name) {
         this.agentName = name;
         // Die Q-Matrix wird von Java standardmäßig mit 0.0 initialisiert
     }
@@ -166,7 +166,7 @@ public class QLearningSpieler implements ILernenderSpieler {
         long rundenZaehler = 0;
 
         // 2. Epsilon-Decay-Rate berechnen, die von 1.0 auf MIN_EPSILON über die ersten 500.000 Runden sinkt
-        double epsilonDecayRunden = 500_000.0;
+        double epsilonDecayRunden = 1_000_000.0;
         double decayRate = Math.pow(MIN_EPSILON / epsilon, 1.0 / epsilonDecayRunden);
 
         while (!abbruchBedingung.abbruch()) {
@@ -206,64 +206,79 @@ public class QLearningSpieler implements ILernenderSpieler {
         Farbe aktuelleFarbe = Farbe.Kreuz; // Kreuz beginnt immer
         Zug letzterGegnerZug = null;
 
-        // Setup des Gegners (für die Methode berechneZug)
         zufallsspieler.neuesSpiel(gegnerFarbe, 0);
 
         boolean spielLaeuft = true;
 
         while (spielLaeuft) {
-
-            Spielfeld s_alt = s.clone(); // Zustand VOR dem Zug (s)
+            Spielfeld s_alt = s.clone();
             Zug neuerZug;
 
             if (aktuelleFarbe == agentenFarbe) {
-                // AGENT: Wählt Aktion und führt Zug aus
+                // Agentenzug
                 int aktion = waehleAktion(s);
                 int zeile = aktion / 3;
                 int spalte = aktion % 3;
                 neuerZug = new Zug(zeile, spalte);
                 s.setFarbe(zeile, spalte, agentenFarbe);
+
+                Spielfeld s_neu = s.clone();
+
+                // Reward IMMER aus Sicht des Agenten
+                double reward = 0.0;
+                boolean spielEnde = false;
+
+                Spielstand standAgent = s.pruefeGewinn(agentenFarbe);
+                Spielstand standGegner = s.pruefeGewinn(gegnerFarbe);
+
+                if (standAgent == Spielstand.GEWONNEN) {
+                    reward = 1.0;
+                    spielEnde = true;
+                } else if (standGegner == Spielstand.GEWONNEN) {
+                    reward = -1.0; // oder -1.5
+                    spielEnde = true;
+                } else if (spielfeldVoll(s)) {
+                    reward = 0.0; // Remis neutral
+                    spielEnde = true;
+                }
+
+                int aktionIndex = neuerZug.getZeile() * 3 + neuerZug.getSpalte();
+                updateQ(s_alt, aktionIndex, reward, s_neu, agentenFarbe);
+
+                if (spielEnde) {
+                    break;
+                }
             } else {
-                // ZUFALLSSPIELER: Berechnet und führt Zug aus (nimmt Zug des Agenten an)
-                zufallsspieler.setFarbe(gegnerFarbe); // Sicherstellen, dass die Farbe gesetzt ist
+                // Gegnerzug (Random)
+                zufallsspieler.setFarbe(gegnerFarbe);
                 neuerZug = zufallsspieler.berechneZug(letzterGegnerZug, 0, 0);
-                // Zug des Zufallsspielers auf dem Spielfeld des Agenten aktualisieren
                 s.setFarbe(neuerZug.getZeile(), neuerZug.getSpalte(), gegnerFarbe);
-            }
 
-            letzterGegnerZug = neuerZug;
-            Spielfeld s_neu = s.clone(); // Zustand NACH dem Zug (s')
+                // Nach Gegnerzug nur auf Spielende prüfen, KEIN Q-Update
+                Spielstand standAgent = s.pruefeGewinn(agentenFarbe);
+                Spielstand standGegner = s.pruefeGewinn(gegnerFarbe);
 
-            // Prüfen & Reward festlegen
-            Spielstand stand = s.pruefeGewinn(aktuelleFarbe);
-            double reward = 0.0;
-            boolean spielEnde = false;
-
-            if (stand != Spielstand.OFFEN) {
-                spielEnde = true;
-                if (stand == Spielstand.GEWONNEN) {
-                    reward = 1.0; // Gewinn
-                } else if (stand == Spielstand.VERLOREN) {
-                    reward = -1.0; // Verlust
-                } else { // UNENTSCHIEDEN
-                    reward = 0.0; // positiver Reward für Unentschieden
+                if (standAgent == Spielstand.GEWONNEN ||
+                    standGegner == Spielstand.GEWONNEN ||
+                    spielfeldVoll(s)) {
+                    break;
                 }
             }
 
-            // Q-UPDATE (Nur, wenn der Agent den Zug gemacht hat)
-            if (aktuelleFarbe == agentenFarbe) {
-                int aktion = neuerZug.getZeile() * 3 + neuerZug.getSpalte();
-                updateQ(s_alt, aktion, reward, s_neu, agentenFarbe);
-            }
+            letzterGegnerZug = neuerZug;
+            aktuelleFarbe = aktuelleFarbe.opposite();
+        }
+    }
 
-            // Spielende prüfen
-            if (spielEnde) {
-                spielLaeuft = false;
-            } else {
-                // Nächster Spieler ist dran
-                aktuelleFarbe = aktuelleFarbe.opposite();
+    private boolean spielfeldVoll(Spielfeld s) {
+        for (int z = 0; z < 3; z++) {
+            for (int sp = 0; sp < 3; sp++) {
+                if (s.getFarbe(z, sp) == Farbe.Leer) {
+                    return false;
+                }
             }
         }
+        return true;
     }
 
     // --- 3. ISpieler Implementierung (für den Wettkampf) ---

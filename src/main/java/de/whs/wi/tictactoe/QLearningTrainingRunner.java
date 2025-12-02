@@ -1,33 +1,41 @@
 // java
 // File: `src/main/java/de/whs/wi/tictactoe/spieler/Flender/TrainingRunner.java`
-package de.whs.wi.tictactoe.spieler.Flender;
+package de.whs.wi.tictactoe;
 
-import tictactoe.Farbe;
+import de.whs.wi.tictactoe.spieler.Flender.QLearningSpielerRandom;
 import tictactoe.TicTacToe;
 import tictactoe.spieler.AbbruchNachIterationen;
-import tictactoe.spieler.AbbruchNachZeit;
 import tictactoe.spieler.ILernenderSpieler;
 import tictactoe.spieler.ISpieler;
 import tictactoe.spieler.beispiel.Zufallsspieler;
 
 import java.io.IOException;
 
-public class TrainingRunner {
+public class QLearningTrainingRunner {
     public static void main(String[] args) {
         ISpieler zufalligerSpieler = new Zufallsspieler("Zufall");
-        ILernenderSpieler agent = new QSpieler();
-        agent.setName("Flender-QAgent");
-        agent.setFarbe(Farbe.Kreis);
+        ILernenderSpieler agent = new QLearningSpielerRandom("Flender-QLearner-Agent");
+
+        // --- Wissen zuerst laden ---
+        try {
+            agent.ladeWissen("wissenZufall.bin");
+            System.out.println("Vorhandenes Wissen gegen Zufallsspieler geladen.");
+        } catch (IOException e) {
+            System.out.println("Kein vorhandenes Wissen gefunden, starte neu.");
+        }
+        System.out.println("===================================================================");
 
         TicTacToe spiel = new TicTacToe();
         ISpieler gewinner;
         int gewinneZufall;
         int gewinneAgent;
+        int unentschieden;
+        double trainingIterations = 5e7;
 
-        // Evaluate Before Training
+        // Evaluate Before Training (Dies ist nun die Evaluierung des geladenen Zustands)
         gewinneZufall = 0;
         gewinneAgent = 0;
-        System.out.println("Vor dem Training:");
+        System.out.println("Status vor dem Training:");
         System.out.println(zufalligerSpieler.getName() + " vs. " + agent.getName());
         System.out.println("=========================================================");
         for (int i = 0; i < 1000; i++) {
@@ -43,26 +51,17 @@ public class TrainingRunner {
         System.out.println("Gewinne " + agent.getName() + ": " + gewinneAgent);
         System.out.println("=========================================================");
 
-        //System.out.println("Q-table size before load: " + agent.getQTableSize());
-        try {
-            agent.ladeWissen("wissen.bin");
-            System.out.println("Vorhandenes Wissen geladen.");
-        } catch (IOException e) {
-            System.out.println("Kein vorhandenes Wissen gefunden, starte neu.");
-        }
-        //System.out.println("Q-table size after load: " + agent.getQTableSize());
-
-
         // Training Phase (iterations)
-        System.out.println("Starte Training mit 200000 Iterationen. Bitte warten...");
+        System.out.printf("Starte Training mit %d Iterationen. Bitte warten...", ((int)trainingIterations));
         long startTime = System.currentTimeMillis();
-        agent.trainieren(new AbbruchNachIterationen(200000));
+        agent.trainieren(new AbbruchNachIterationen((int) trainingIterations));
         long endTime = System.currentTimeMillis();
         System.out.println("Training beendet. Gesamtdauer in Sekunden: " + ((endTime - startTime) / 1000.0));
 
         // Evaluate After Training
         gewinneZufall = 0;
         gewinneAgent = 0;
+        unentschieden = 0;
         System.out.println("Nach dem Training:");
         System.out.println(zufalligerSpieler.getName() + " vs. " + agent.getName());
         System.out.println("=========================================================");
@@ -70,25 +69,24 @@ public class TrainingRunner {
             gewinner = spiel.neuesSpiel(zufalligerSpieler, agent, 150, false);
             if (gewinner == zufalligerSpieler) gewinneZufall++;
             else if (gewinner == agent) gewinneAgent++;
+            else unentschieden++;
 
             gewinner = spiel.neuesSpiel(agent, zufalligerSpieler, 150, false);
             if (gewinner == zufalligerSpieler) gewinneZufall++;
             else if (gewinner == agent) gewinneAgent++;
+            else unentschieden++;
         }
         System.out.println("Gewinne " + zufalligerSpieler.getName() + ": " + gewinneZufall);
+        System.out.println("Unentschieden: " + unentschieden);
         System.out.println("Gewinne " + agent.getName() + ": " + gewinneAgent);
         System.out.println("=========================================================");
 
         // Save Learned Knowledge
         try {
-            agent.speichereWissen("wissen.bin");
-            System.out.println("Wissen gespeichert.");
+            agent.speichereWissen("wissenZufall.bin");
+            System.out.println("Wissen gegem Zufallsspieler gespeichert.");
         } catch (IOException e) {
             System.err.println("Fehler beim Speichern des Wissens: " + e.getMessage());
-            e.printStackTrace();
         }
-
-        /* ... after agent.trainieren(...) finished ... */
-        //System.out.println("Q-table size after training: " + agent.getQTableSize());
-        }
+    }
 }
