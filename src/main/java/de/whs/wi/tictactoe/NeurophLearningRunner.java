@@ -1,8 +1,6 @@
 package de.whs.wi.tictactoe;
 
-import de.whs.wi.tictactoe.spieler.Flender.HeuristikSpieler;
-import de.whs.wi.tictactoe.spieler.Flender.QLearningNeurophSpieler;
-import de.whs.wi.tictactoe.spieler.Flender.QLearningSpielerHeuristik;
+import de.whs.wi.tictactoe.spieler.Flender.PolicyGradientNeurophSpieler;
 import tictactoe.TicTacToe;
 import tictactoe.spieler.AbbruchNachIterationen;
 import tictactoe.spieler.ILernenderSpieler;
@@ -14,9 +12,8 @@ import java.io.IOException;
 public class NeurophLearningRunner {
     public static void main(String[] args) {
         ISpieler zufaelligerSpieler = new Zufallsspieler("Zufall");
-        ILernenderSpieler agent = new QLearningNeurophSpieler("Flender-Neuroph-Agent");
+        ILernenderSpieler agent = new PolicyGradientNeurophSpieler("Flender-Policy-Agent");
 
-        // --- Wissen zuerst laden ---
         try {
             agent.ladeWissen("wissenNeurophZufall.bin");
             System.out.println("Vorhandenes Wissen gegen Zufallsspieler-Spieler geladen.");
@@ -30,9 +27,8 @@ public class NeurophLearningRunner {
         int gewinneZufall;
         int gewinneAgent;
         int unentschieden;
-        double trainingIterations = 1e6;
+        double trainingIterations = 500000;
 
-        // Evaluate Before Training (Dies ist nun die Evaluierung des geladenen Zustands)
         gewinneZufall = 0;
         gewinneAgent = 0;
         System.out.println("Status vor dem Training:");
@@ -51,17 +47,12 @@ public class NeurophLearningRunner {
         System.out.println("Gewinne " + agent.getName() + ": " + gewinneAgent);
         System.out.println("=========================================================");
 
-        // Training Phase (iterations)
         System.out.printf("Starte Training mit %d Iterationen. Bitte warten...", ((int)trainingIterations));
         long startTime = System.currentTimeMillis();
         agent.trainieren(new AbbruchNachIterationen((int) trainingIterations));
-        if (agent instanceof QLearningNeurophSpieler qAgent) {
-            qAgent.setEpsilon(0.0); // Setze Epsilon nach dem Training auf einen niedrigen Wert
-        }
         long endTime = System.currentTimeMillis();
         System.out.println("Training beendet. Gesamtdauer in Sekunden: " + ((endTime - startTime) / 1000.0));
 
-        // Evaluate After Training
         gewinneZufall = 0;
         gewinneAgent = 0;
         unentschieden = 0;
@@ -84,7 +75,6 @@ public class NeurophLearningRunner {
         System.out.println("Gewinne " + agent.getName() + ": " + gewinneAgent);
         System.out.println("=========================================================");
 
-        // Save Learned Knowledge
         try {
             agent.speichereWissen("wissenNeurophZufall.bin");
             System.out.println("Wissen gegen Zufalls-Spieler gespeichert.");
