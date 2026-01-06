@@ -163,7 +163,7 @@ public class QLearningNeurophSpieler implements ILernenderSpieler {
 
         while (!abbruch.abbruch()) {
             Farbe starter = (runde % 2 == 0) ? Farbe.Kreuz : Farbe.Kreis;
-            simuliereSpielGegenHeuristik(starter);
+            simuliereSpielGegenZufall(starter);  // <-- Geändert
 
             if (runde < decayRunden && epsilon > MIN_EPSILON) {
                 epsilon *= decayRate;
@@ -179,14 +179,15 @@ public class QLearningNeurophSpieler implements ILernenderSpieler {
         return true;
     }
 
-    private void simuliereSpielGegenHeuristik(Farbe agentStart) {
+    private void simuliereSpielGegenZufall(Farbe agentStart) {
         Spielfeld board = new Spielfeld();
-        HeuristikSpieler gegner = new HeuristikSpieler("Heuristik-Gegner");
+        tictactoe.spieler.beispiel.Zufallsspieler gegner =
+            new tictactoe.spieler.beispiel.Zufallsspieler("Zufall-Gegner");
 
         Farbe agentColor = agentStart;
         Farbe oppColor = agentColor.opposite();
 
-        Farbe amZug = Farbe.Kreuz; // Kreuz beginnt
+        Farbe amZug = Farbe.Kreuz;
         Zug letzterZug = null;
 
         gegner.neuesSpiel(oppColor, 0);
@@ -214,10 +215,10 @@ public class QLearningNeurophSpieler implements ILernenderSpieler {
                     reward = 1.0;
                     terminal = true;
                 } else if (standGegner == Spielstand.GEWONNEN) {
-                    reward = -2.0;
+                    reward = -1.0;
                     terminal = true;
                 } else if (spielfeldVoll(board)) {
-                    reward = 0.5;
+                    reward = 0.0;
                     terminal = true;
                 }
 
@@ -226,18 +227,8 @@ public class QLearningNeurophSpieler implements ILernenderSpieler {
                 letzterZug = zug;
                 if (terminal) break;
             } else {
-                try {
-                    zug = gegner.berechneZug(letzterZug, 0, 0);
-                } catch (IllegalerZugException e) {
-                    int a;
-                    int z, s;
-                    do {
-                        a = random.nextInt(9);
-                        z = a / 3;
-                        s = a % 3;
-                    } while (board.getFarbe(z, s) != Farbe.Leer);
-                    zug = new Zug(z, s);
-                }
+                gegner.setFarbe(oppColor);
+                zug = gegner.berechneZug(letzterZug, 0, 0);
                 board.setFarbe(zug.getZeile(), zug.getSpalte(), oppColor);
                 letzterZug = zug;
 
@@ -303,6 +294,10 @@ public class QLearningNeurophSpieler implements ILernenderSpieler {
 
     @Override
     public Farbe getFarbe() { return agentFarbe; }
+
+    public void setEpsilon(double epsilon) {
+        this.epsilon = epsilon;
+    }
 
     // --- Wissensspeicherung für Netz ---
 
